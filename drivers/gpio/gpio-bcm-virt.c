@@ -13,7 +13,6 @@
 #include <linux/err.h>
 #include <linux/gpio.h>
 #include <linux/module.h>
-#include <linux/basic_mmio_gpio.h>
 #include <linux/platform_device.h>
 #include <soc/bcm2835/raspberrypi-firmware.h>
 
@@ -125,7 +124,7 @@ static int brcmvirt_gpio_probe(struct platform_device *pdev)
 
 	ucb->gc.label = MODULE_NAME;
 	ucb->gc.owner = THIS_MODULE;
-	ucb->gc.dev = dev;
+	//ucb->gc.dev = dev;
 	ucb->gc.of_node = np;
 	ucb->gc.base = 100;
 	ucb->gc.ngpio = NUM_GPIO;
