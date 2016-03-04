@@ -21,7 +21,7 @@ create_package() {
 	cp debian/changelog "$pdir/usr/share/doc/$pname/changelog.Debian"
 	gzip -9 "$pdir/usr/share/doc/$pname/changelog.Debian"
 	sh -c "cd '$pdir'; find . -type f ! -path './DEBIAN/*' -printf '%P\0' \
-		| xargs -r0 md5sum > DEBIAN/md5sums"
+		| xargs -r0 -L 256 md5sum > DEBIAN/md5sums"
 
 	# Fix ownership and permissions
 	chown -R root:root "$pdir"
@@ -94,11 +94,15 @@ fwdir="$objtree/debian/fwtmp"
 kernel_headers_dir="$objtree/debian/hdrtmp"
 libc_headers_dir="$objtree/debian/headertmp"
 dbg_dir="$objtree/debian/dbgtmp"
-packagename=linux-image-$version
-fwpackagename=linux-firmware-image-$version
-kernel_headers_packagename=linux-headers-$version
-libc_headers_packagename=linux-libc-dev
-dbg_packagename=$packagename-dbg
+if grep -q '^CONFIG_MACH_BCM2709=y' $KCONFIG_CONFIG ; then
+    packagename=linux-image-rpi2-rt
+    fwpackagename=linux-firmware-image-rpi2-rt
+    kernel_headers_packagename=linux-headers-rpi2-rt
+else
+    packagename=linux-image-rpi-rt
+    fwpackagename=linux-firmware-image-rpi-rt
+    kernel_headers_packagename=linux-headers-rpi-rt
+fi
 debarch=
 forcearch=
 set_debarch
@@ -148,10 +152,13 @@ else
 	cp arch/$ARCH/boot/$KBUILD_IMAGE "$tmpdir/$installed_image_path"
 fi
 
+${srctree}/scripts/mkknlimg "$tmpdir/$installed_image_path" "$tmpdir/boot/kernel_rt-$version.img"
+rm "$tmpdir/$installed_image_path"
+
 if grep -q "^CONFIG_OF=y" $KCONFIG_CONFIG ; then
 	# Only some architectures with OF support have this target
 	if grep -q dtbs_install "${srctree}/arch/$SRCARCH/Makefile"; then
-		$MAKE KBUILD_SRC= INSTALL_DTBS_PATH="$tmpdir/usr/lib/$packagename" dtbs_install
+		$MAKE KBUILD_SRC= INSTALL_DTBS_PATH="$tmpdir/boot/dtbs_rt" dtbs_install
 	fi
 fi
 
@@ -188,36 +195,6 @@ if [ "$ARCH" != "um" ]; then
 	$MAKE headers_install KBUILD_SRC= INSTALL_HDR_PATH="$libc_headers_dir/usr"
 fi
 
-# Install the maintainer scripts
-# Note: hook scripts under /etc/kernel are also executed by official Debian
-# kernel packages, as well as kernel packages built using make-kpkg.
-# make-kpkg sets $INITRD to indicate whether an initramfs is wanted, and
-# so do we; recent versions of dracut and initramfs-tools will obey this.
-debhookdir=${KDEB_HOOKDIR:-/etc/kernel}
-if grep -q '^CONFIG_BLK_DEV_INITRD=y' $KCONFIG_CONFIG; then
-	want_initrd=Yes
-else
-	want_initrd=No
-fi
-for script in postinst postrm preinst prerm ; do
-	mkdir -p "$tmpdir$debhookdir/$script.d"
-	cat <<EOF > "$tmpdir/DEBIAN/$script"
-#!/bin/sh
-
-set -e
-
-# Pass maintainer script parameters to hook scripts
-export DEB_MAINT_PARAMS="\$*"
-
-# Tell initramfs builder whether it's wanted
-export INITRD=$want_initrd
-
-test -d $debhookdir/$script.d && run-parts --arg="$version" --arg="/$installed_image_path" $debhookdir/$script.d
-exit 0
-EOF
-	chmod 755 "$tmpdir/DEBIAN/$script"
-done
-
 # Try to determine maintainer and email values
 if [ -n "$DEBEMAIL" ]; then
        email=$DEBEMAIL
@@ -248,16 +225,16 @@ fi
 
 # Generate a simple changelog template
 cat <<EOF > debian/changelog
-$sourcename ($packageversion) $distribution; urgency=low
+linux-rt ($packageversion) $distribution; urgency=low
 
-  * Custom built Linux kernel.
+  * RPi Linux kernel with rt-preempt patches.
 
  -- $maintainer  $(date -R)
 EOF
 
 # Generate copyright file
 cat <<EOF > debian/copyright
-This is a packacked upstream version of the Linux kernel.
+This is a packaged RPi version of the Linux kernel.
 
 The sources may be found at most Linux ftp sites, including:
 ftp://ftp.kernel.org/pub/linux/kernel
@@ -280,7 +257,7 @@ build_depends="bc, kmod, cpio "
 
 # Generate a control file
 cat <<EOF > debian/control
-Source: $sourcename
+Source: linux-rt
 Section: kernel
 Priority: optional
 Maintainer: $maintainer
@@ -310,7 +287,7 @@ else
 	cat <<EOF >> debian/control
 
 Package: $packagename
-Provides: linux-image, linux-image-2.6, linux-modules-$version
+Provides: linux-image-rt, linux-image-rt-4.4, linux-modules-rt-$version
 Suggests: $fwpackagename
 Architecture: any
 Description: Linux kernel, version $version
@@ -361,49 +338,11 @@ EOF
 	create_package "$fwpackagename" "$fwdir"
 fi
 
-cat <<EOF >> debian/control
-
-Package: $libc_headers_packagename
-Section: devel
-Provides: linux-kernel-headers
-Architecture: any
-Description: Linux support headers for userspace development
- This package provides userspaces headers from the Linux kernel.  These headers
- are used by the installed headers for GNU glibc and other system libraries.
-EOF
-
 if [ "$ARCH" != "um" ]; then
 	create_package "$kernel_headers_packagename" "$kernel_headers_dir"
-	create_package "$libc_headers_packagename" "$libc_headers_dir"
 fi
 
 create_package "$packagename" "$tmpdir"
-
-if [ -n "$BUILD_DEBUG" ] ; then
-	# Build debug package
-	# Different tools want the image in different locations
-	# perf
-	mkdir -p $dbg_dir/usr/lib/debug/lib/modules/$version/
-	cp vmlinux $dbg_dir/usr/lib/debug/lib/modules/$version/
-	# systemtap
-	mkdir -p $dbg_dir/usr/lib/debug/boot/
-	ln -s ../lib/modules/$version/vmlinux $dbg_dir/usr/lib/debug/boot/vmlinux-$version
-	# kdump-tools
-	ln -s lib/modules/$version/vmlinux $dbg_dir/usr/lib/debug/vmlinux-$version
-
-	cat <<EOF >> debian/control
-
-Package: $dbg_packagename
-Section: debug
-Provides: linux-debug, linux-debug-$version
-Architecture: any
-Description: Linux kernel debugging symbols for $version
- This package will come in handy if you need to debug the kernel. It provides
- all the necessary debug symbols for the kernel and its modules.
-EOF
-
-	create_package "$dbg_packagename" "$dbg_dir"
-fi
 
 if [ "x$1" = "xdeb-pkg" ]
 then
