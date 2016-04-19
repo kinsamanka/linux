@@ -1,8 +1,8 @@
 #!/bin/bash -e
 
-SCRIPT_PATH=$(dirname $(readlink -f $0))
+SCRIPT_PATH="$(dirname "$(readlink -f $0)")"
 
-cd $SCRIPT_PATH/..
+cd "$SCRIPT_PATH/.."
 
 COMMIT_TIMESTAMP="$(git log -1 --pretty=format:%at)"
 
@@ -23,7 +23,7 @@ mkdir -p ../.output
 mv ../*deb ../.output
 
 # configure RPi kernel
-cd $SCRIPT_PATH/..
+cd "$SCRIPT_PATH/.."
 rm -rf .build
 make O=.build bcmrpi_defconfig
 

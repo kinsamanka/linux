@@ -6,7 +6,7 @@ DOCKER_IMAGE=machinekit/mk-builder:raspbian-armhf
 docker pull ${DOCKER_IMAGE}
 
 # make sure we are in the root dir
-cd "$(dirname $(readlink -f $0))/../"
+cd "$(dirname "$(readlink -f $0)")/../"
 
 # start build
 docker run -v "$(pwd)":/opt/rootfs/work ${DOCKER_IMAGE} \
